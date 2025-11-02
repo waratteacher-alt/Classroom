@@ -435,6 +435,7 @@
             `;
         }
 
+        // --- START: แก้ไขหน้าลงทะเบียน ---
         function renderRegisterView() {
             return `
                 <div class="flex items-center justify-center min-h-screen">
@@ -444,15 +445,12 @@
                             
                             <input id="register-student-id" type="text" placeholder="รหัสประจำตัวนักเรียน" class="w-full p-3 border rounded-md" required>
 
-                            <div class="flex gap-4">
-                                <input id="register-firstname" type="text" placeholder="ชื่อจริง (ตามที่ครูลงทะเบียน)" class="w-full p-3 border rounded-md" required>
-                                <input id="register-lastname" type="text" placeholder="นามสกุล (ตามที่ครูลงทะเบียน)" class="w-full p-3 border rounded-md" required>
-                            </div>
+                            <!-- ลบช่อง ชื่อ-นามสกุล ออก -->
                             
                             <input id="register-email" type="email" placeholder="Email (สำหรับใช้ Login)" class="w-full p-3 border rounded-md" required>
                             <input id="register-password" type="password" placeholder="Password (อย่างน้อย 6 ตัวอักษร)" class="w-full p-3 border rounded-md" required>
                             
-                            <p class="text-xs text-gray-600">หมายเหตุ: คุณจะลงทะเบียนได้ต่อเมื่อครูได้เพิ่ม รหัสประจำตัว, ชื่อ และนามสกุล ของคุณเข้าระบบแล้วเท่านั้น</p>
+                            <p class="text-xs text-gray-600">หมายเหตุ: คุณจะลงทะเบียนได้ต่อเมื่อครูได้เพิ่ม รหัสประจำตัว ของคุณเข้าระบบแล้วเท่านั้น</p>
                             
                             <button type="submit" class="w-full bg-green-500 text-white p-3 rounded-md hover:bg-green-600 transition-colors font-semibold">ลงทะเบียน</button>
                         </form>
@@ -463,6 +461,7 @@
                 </div>
             `;
         }
+        // --- END: แก้ไขหน้าลงทะเบียน ---
 
         // --- APP VIEWS ---
 
@@ -624,7 +623,6 @@
                                             }
                                         </div>
                                         <div class="flex space-x-2 flex-shrink-0">
-                                            <!-- เพิ่ม: ปุ่มแก้ไข Roster -->
                                             <button onclick="window.showEditRosterModal('${item.id}')" class="text-sm bg-yellow-100 text-yellow-700 px-3 py-1 rounded-md hover:bg-yellow-200">แก้ไข</button>
                                             <button onclick="window.handleDelete('roster', '${item.id}')" class="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md hover:bg-red-200">ลบ</button>
                                         </div>
@@ -705,7 +703,6 @@
                                         </div>
                                         <div class="flex space-x-2 flex-shrink-0">
                                             <button onclick="window.showViewSubmissions('${assign.id}')" class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md hover:bg-blue-200">ดูคนส่ง</button>
-                                            <!-- เพิ่ม: ปุ่มแก้ไข Assignment -->
                                             <button onclick="window.showEditAssignmentModal('${assign.id}')" class="text-sm bg-yellow-100 text-yellow-700 px-3 py-1 rounded-md hover:bg-yellow-200">แก้ไข</button>
                                             <button onclick="window.showExtendDeadline('${assign.id}')" class="text-sm bg-gray-100 text-gray-700 px-3 py-1 rounded-md hover:bg-gray-200">ขยายเวลา</button>
                                             <button onclick="window.handleDelete('assignments', '${assign.id}')" class="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md hover:bg-red-200">ลบ</button>
@@ -1019,7 +1016,6 @@
                 return modalWrapper(title, content);
             }
 
-            // --- เพิ่ม: Modal แก้ไข Roster ---
             if (currentModal === 'editRoster') {
                 const { rosterItem } = modalData;
                 const title = "แก้ไขข้อมูลนักเรียน";
@@ -1052,7 +1048,6 @@
                         </div>
                     </form>
                 `;
-                // ตั้งค่า Dropdown หลัง Render
                 setTimeout(() => {
                     const select = document.getElementById('edit-roster-classroom');
                     if(select) select.value = rosterItem.classroomId;
@@ -1060,7 +1055,6 @@
                 return modalWrapper(title, content);
             }
 
-            // --- เพิ่ม: Modal แก้ไข Assignment ---
             if (currentModal === 'editAssignment') {
                 const { assignment } = modalData;
                 const title = "แก้ไขงาน";
@@ -1098,7 +1092,6 @@
                         </div>
                     </form>
                 `;
-                // ตั้งค่า Dropdown หลัง Render
                 setTimeout(() => {
                     const select = document.getElementById('edit-assignment-classroom');
                     if(select) select.value = assignment.classroomId;
@@ -1145,7 +1138,6 @@
             const gradeSubmissionForm = document.getElementById('grade-submission-form');
             if (gradeSubmissionForm) gradeSubmissionForm.onsubmit = handleSaveGrade;
 
-            // เพิ่ม:
             const editRosterForm = document.getElementById('edit-roster-form');
             if (editRosterForm) editRosterForm.onsubmit = handleEditRoster;
 
@@ -1207,29 +1199,28 @@
             }
         }
         
+        // --- START: แก้ไขตรรกะการลงทะเบียน ---
         async function handleRegister() {
             const studentId = document.getElementById('register-student-id').value.trim();
-            const firstName = document.getElementById('register-firstname').value.trim();
-            const lastName = document.getElementById('register-lastname').value.trim();
+            // ลบ firstName, lastName
             const email = document.getElementById('register-email').value;
             const password = document.getElementById('register-password').value;
             
-            if (!studentId || !firstName || !lastName || !email || !password) {
-                window.showMessage('กรุณากรอกข้อมูลให้ครบทุกช่อง', 'error');
+            if (!studentId || !email || !password) { // อัปเดตเงื่อนไข
+                window.showMessage('กรุณากรอกข้อมูลให้ครบทุกช่อง (รหัสประจำตัว, Email, Password)', 'error');
                 return;
             }
             
+            // ค้นหาด้วยรหัสประจำตัวอย่างเดียว
             const q = query(collection(db, rosterPath()), 
-                where("studentId", "==", studentId),
-                where("firstName", "==", firstName),
-                where("lastName", "==", lastName)
+                where("studentId", "==", studentId)
             );
             
             try {
                 const querySnapshot = await getDocs(q);
                 
                 if (querySnapshot.empty) {
-                    window.showMessage('ลงทะเบียนไม่สำเร็จ: รหัสประจำตัว, ชื่อ หรือนามสกุล ไม่ถูกต้อง หรือไม่มีในรายชื่อที่ครูอนุญาต', 'error');
+                    window.showMessage('ลงทะเบียนไม่สำเร็จ: รหัสประจำตัวนักเรียน ไม่ถูกต้อง หรือไม่มีในรายชื่อที่ครูอนุญาต', 'error'); // อัปเดตข้อความ
                     return;
                 }
                 
@@ -1246,20 +1237,25 @@
                     return;
                 }
                 
+                // ดึงชื่อ-นามสกุล จาก Roster
+                const { firstName, lastName } = rosterData;
+
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
                 
+                // สร้างโปรไฟล์ผู้ใช้โดยดึงชื่อจาก Roster
                 const userDocRef = doc(db, usersPath(), user.uid);
                 await setDoc(userDocRef, {
                     email: user.email,
-                    firstName: firstName,
-                    lastName: lastName,
+                    firstName: firstName, // <-- ดึงจาก Roster
+                    lastName: lastName,   // <-- ดึงจาก Roster
                     studentId: studentId,
                     classroomId: rosterData.classroomId, 
                     status: 'student', 
                     registeredAt: Timestamp.now()
                 });
                 
+                // อัปเดต Roster ว่าลงทะเบียนแล้ว
                 const rosterDocRef = doc(db, rosterPath(), rosterDoc.id);
                 await updateDoc(rosterDocRef, {
                     isRegistered: true,
@@ -1272,6 +1268,7 @@
                 window.showMessage(`ลงทะเบียนไม่สำเร็จ: ${error.message}`, 'error');
             }
         }
+        // --- END: แก้ไขตรรกะการลงทะเบียน ---
         
         async function handleLogout() {
             try {
@@ -1363,7 +1360,6 @@
             }
         }
         
-        // --- เพิ่ม: ฟังก์ชันเปิด Modal แก้ไข Roster ---
         window.showEditRosterModal = (rosterId) => {
             const rosterItem = roster.find(r => r.id === rosterId);
             if (!rosterItem) {
@@ -1375,7 +1371,6 @@
             render();
         }
 
-        // --- เพิ่ม: ฟังก์ชันบันทึกการแก้ไข Roster ---
         async function handleEditRoster(e) {
             e.preventDefault();
             const rosterId = e.target.dataset.rosterId;
@@ -1392,7 +1387,6 @@
             const rosterItem = roster.find(r => r.id === rosterId);
             if (!rosterItem) return;
 
-            // ตรวจสอบ Student ID ซ้ำ (เฉพาะในกรณีที่เปลี่ยน ID และ ID นั้นไม่ใช่ของตัวเอง)
             if (rosterItem.studentId !== studentId) {
                 const q = query(collection(db, rosterPath()), where("studentId", "==", studentId));
                 const querySnapshot = await getDocs(q);
@@ -1411,7 +1405,6 @@
                     lastName: lastName
                 });
 
-                // --- สำคัญ: ถ้าแก้ห้องนักเรียนที่ลงทะเบียนแล้ว ต้องแก้ใน /users ด้วย ---
                 if (rosterItem.isRegistered && rosterItem.registeredUserId) {
                     const userDocRef = doc(db, usersPath(), rosterItem.registeredUserId);
                     await updateDoc(userDocRef, {
@@ -1490,7 +1483,6 @@
             }
         }
 
-        // --- เพิ่ม: ฟังก์ชันเปิด Modal แก้ไข Assignment ---
         window.showEditAssignmentModal = (assignmentId) => {
             const assignment = assignments.find(a => a.id === assignmentId);
             if (!assignment) {
@@ -1502,7 +1494,6 @@
             render();
         }
 
-        // --- เพิ่ม: ฟังก์ชันบันทึกการแก้ไข Assignment ---
         async function handleEditAssignment(e) {
             e.preventDefault();
             const assignmentId = e.target.dataset.assignmentId;
