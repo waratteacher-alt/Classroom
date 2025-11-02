@@ -1,0 +1,1764 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบห้องเรียนออนไลน์</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f6;
+        }
+
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .sidebar-icon {
+            transition: all 0.3s ease;
+        }
+
+        .sidebar-icon:hover {
+            background-color: #4f46e5;
+            color: #ffffff;
+        }
+
+        .sidebar-item {
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-item.active {
+            background-color: #eef2ff;
+            color: #4f46e5;
+            font-weight: 600;
+            border-right: 4px solid #4f46e5;
+        }
+
+        .sidebar-item:hover {
+            background-color: #f9fafb;
+        }
+
+        .btn {
+            @apply py-2 px-4 rounded-lg font-semibold shadow-sm transition-all duration-200;
+        }
+
+        .btn-primary {
+            @apply bg-indigo-600 text-white hover:bg-indigo-700;
+        }
+
+        .btn-secondary {
+            @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
+        }
+
+        .btn-danger {
+            @apply bg-red-600 text-white hover:bg-red-700;
+        }
+        
+        .btn-success {
+            @apply bg-green-600 text-white hover:bg-green-700;
+        }
+
+        .badge {
+            @apply px-2 py-0.5 rounded-full text-xs font-medium;
+        }
+
+        .badge-pending {
+            @apply bg-yellow-100 text-yellow-800;
+        }
+
+        .badge-student {
+            @apply bg-blue-100 text-blue-800;
+        }
+
+        .badge-teacher {
+            @apply bg-indigo-100 text-indigo-800;
+        }
+        
+        .badge-unregistered {
+            @apply bg-gray-100 text-gray-800;
+        }
+
+        .badge-registered {
+            @apply bg-green-100 text-green-800;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="password"],
+        input[type="url"],
+        input[type="number"],
+        input[type="date"] {
+            @apply w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500;
+        }
+    </style>
+</head>
+
+<body class="flex h-screen">
+
+    <!-- Loading Spinner -->
+    <div id="loading" class="fixed inset-0 bg-white bg-opacity-75 flex items-center justify-center z-50">
+        <i class="fas fa-spinner fa-spin fa-3x text-indigo-600"></i>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="app" class="flex-1 flex flex-col h-screen overflow-hidden">
+        <!-- App content will be rendered here -->
+    </div>
+
+    <!-- Modals (Pop-ups) -->
+    <div id="modal-container"></div>
+
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import {
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            signOut
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {
+            getFirestore,
+            doc,
+            getDoc,
+            addDoc,
+            setDoc,
+            updateDoc,
+            deleteDoc,
+            onSnapshot,
+            collection,
+            query,
+            where,
+            getDocs,
+            Timestamp,
+            writeBatch,
+            serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import {
+            getStorage,
+            ref,
+            uploadBytes,
+            getDownloadURL,
+            deleteObject
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+
+        // --- GLOBAL STATE ---
+        let app, db, auth, storage;
+        let currentUserAuth = null; // Firebase Auth object (null if logged out)
+        let currentUserData = null; // Firestore user data (status, name, etc.)
+        
+        let usersList = []; // Local cache for all users
+        let documentsList = []; // Local cache for documents
+        let assignmentsList = []; // Local cache for assignments
+        let submissionsList = []; // Local cache for submissions
+        let studentRoster = []; // Local cache for student roster
+
+        // Listeners (for cleanup)
+        let cleanupListeners = [];
+
+        // UI State
+        let currentModal = null; // 'login', 'register', 'uploadDoc', 'createAssignment', etc.
+        let currentTeacherView = 'manageUsers'; // Default teacher view
+        let currentStudentView = 'downloadDocs'; // Default student view
+        let isLoading = true;
+
+        // --- CONFIG ---
+        // DO NOT EDIT __app_id OR __firebase_config manually
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'classroom-2f761';
+        const firebaseConfigStr = typeof __firebase_config !== 'undefined' ?
+            __firebase_config :
+            JSON.stringify({
+                apiKey: "AIzaSyCqax0IdvYgaU3pQyAjYKad2WAfc0l0tpI",
+                authDomain: "classroom-2f761.firebaseapp.com",
+                projectId: "classroom-2f761",
+                storageBucket: "classroom-2f761.firebasestorage.app",
+                messagingSenderId: "1000272941555",
+                appId: "1:1000272941555:web:07672098f97067db160286",
+                measurementId: "G-VMMVKXN6W2"
+            });
+        
+        const firebaseConfig = JSON.parse(firebaseConfigStr);
+
+        // --- COLLECTIONS ---
+        const getCollectionPath = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
+        const usersCol = () => collection(db, getCollectionPath('users'));
+        const docsCol = () => collection(db, getCollectionPath('documents'));
+        const assignmentsCol = () => collection(db, getCollectionPath('assignments'));
+        const submissionsCol = () => collection(db, getCollectionPath('submissions'));
+        const downloadsCol = () => collection(db, getCollectionPath('downloads'));
+        const rosterCol = () => collection(db, getCollectionPath('roster')); // For student roster
+
+        // --- INITIALIZATION ---
+        window.onload = async () => {
+            try {
+                console.log("App initializing...");
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                storage = getStorage(app);
+
+                // Set log level for debugging
+                // setLogLevel('debug');
+
+                // --- Auth State Listener ---
+                // This is the main controller for the app.
+                // It fires when the app loads and whenever the login state changes.
+                onAuthStateChanged(auth, async (user) => {
+                    console.log("Auth state changed. User:", user ? user.uid : 'Logged out');
+                    
+                    // Clean up old data listeners to prevent memory leaks
+                    cleanupAllListeners();
+                    
+                    if (user) {
+                        currentUserAuth = user;
+                        // Fetch user data from Firestore
+                        const userDocRef = doc(db, getCollectionPath('users'), user.uid);
+                        const userDocSnap = await getDoc(userDocRef);
+
+                        if (userDocSnap.exists()) {
+                            currentUserData = { uid: user.uid, ...userDocSnap.data() };
+                            console.log("User data found:", currentUserData.status);
+                            
+                            // Attach data listeners based on user role
+                            attachDataListeners(currentUserData.status);
+                            
+                            // Render the correct UI
+                            renderApp();
+                        } else {
+                            // This shouldn't happen with the new register flow, but good to have
+                            console.error("User document not found in Firestore!");
+                            currentUserData = null; // No data, treat as pending
+                            renderApp();
+                        }
+                    } else {
+                        // User is logged out
+                        currentUserAuth = null;
+                        currentUserData = null;
+                        renderApp(); // Render the login screen
+                    }
+                    setLoading(false);
+                });
+
+            } catch (error) {
+                console.error("Firebase Init Error:", error);
+                document.getElementById('app').innerHTML = `<div class="p-4 text-red-700 bg-red-100 rounded">เกิดข้อผิดพลาดในการเชื่อมต่อ: ${error.message}</div>`;
+                setLoading(false);
+            }
+
+            // Attach window functions (must be done last)
+            attachWindowFunctions();
+        };
+
+        // --- DATA LISTENERS ---
+
+        function cleanupAllListeners() {
+            console.log(`Cleaning up ${cleanupListeners.length} old listeners...`);
+            cleanupListeners.forEach(unsubscribe => unsubscribe());
+            cleanupListeners = [];
+        }
+
+        function attachDataListeners(status) {
+            console.log(`Attaching listeners for status: ${status}`);
+            
+            // All authenticated users can see documents and assignments
+            const docsQuery = query(docsCol());
+            const docsUnsub = onSnapshot(docsQuery, (snapshot) => {
+                documentsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp(); // Re-render app with new data
+            }, (err) => console.error("Docs listener error:", err));
+            cleanupListeners.push(docsUnsub);
+
+            const assignmentsQuery = query(assignmentsCol());
+            const assignmentsUnsub = onSnapshot(assignmentsQuery, (snapshot) => {
+                assignmentsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (err) => console.error("Assignments listener error:", err));
+            cleanupListeners.push(assignmentsUnsub);
+
+            // Teachers get extra data
+            if (status === 'teacher') {
+                // Listen for all users
+                const usersQuery = query(usersCol());
+                const usersUnsub = onSnapshot(usersQuery, (snapshot) => {
+                    usersList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderApp();
+                }, (err) => console.error("Users listener error:", err));
+                cleanupListeners.push(usersUnsub);
+
+                // Listen for all submissions
+                const submissionsQuery = query(submissionsCol());
+                const subsUnsub = onSnapshot(submissionsQuery, (snapshot) => {
+                    submissionsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderApp();
+                }, (err) => console.error("Submissions listener error:", err));
+                cleanupListeners.push(subsUnsub);
+
+                // Listen for student roster
+                const rosterQuery = query(rosterCol());
+                const rosterUnsub = onSnapshot(rosterQuery, (snapshot) => {
+                    studentRoster = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderApp();
+                }, (err) => console.error("Roster listener error:", err));
+                cleanupListeners.push(rosterUnsub);
+            }
+            
+            // Students get their own submissions
+            if (status === 'student') {
+                const studentSubsQuery = query(submissionsCol(), where("studentId", "==", currentUserAuth.uid));
+                const studentSubsUnsub = onSnapshot(studentSubsQuery, (snapshot) => {
+                    submissionsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderApp();
+                }, (err) => console.error("Student submissions listener error:", err));
+                cleanupListeners.push(studentSubsUnsub);
+            }
+        }
+
+
+        // --- UI RENDERING ---
+
+        function setLoading(state) {
+            isLoading = state;
+            const loader = document.getElementById('loading');
+            if (loader) {
+                loader.style.display = state ? 'flex' : 'none';
+            }
+        }
+
+        // Main App Renderer
+        function renderApp() {
+            if (isLoading) return; // Don't render if still loading
+            
+            const appDiv = document.getElementById('app');
+            if (!appDiv) return;
+
+            if (!currentUserAuth) {
+                // Not logged in
+                appDiv.innerHTML = renderLoginRegister();
+            } else if (!currentUserData || currentUserData.status === 'pending') {
+                // Logged in, but pending approval
+                appDiv.innerHTML = renderPendingView();
+            } else if (currentUserData.status === 'teacher') {
+                // Logged in as Teacher
+                appDiv.innerHTML = renderTeacherView();
+            } else if (currentUserData.status === 'student') {
+                // Logged in as Student
+                appDiv.innerHTML = renderStudentView();
+            }
+            
+            // Always render modals (they are hidden by default)
+            renderModals();
+        }
+
+        // --- AUTH & LOGIN VIEWS ---
+
+        function renderLoginRegister() {
+            // Show Login by default
+            return `
+                <div class="flex items-center justify-center min-h-screen bg-gray-100">
+                    <div class="w-full max-w-md p-8 space-y-6 bg-white rounded-lg shadow-lg">
+                        ${currentModal === 'register' ? renderRegisterForm() : renderLoginForm()}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderLoginForm() {
+            return `
+                <div>
+                    <h2 class="text-3xl font-bold text-center text-gray-900">เข้าสู่ระบบ</h2>
+                    <p class="mt-2 text-center text-sm text-gray-600">
+                        กรุณาเข้าสู่ระบบเพื่อใช้งาน
+                    </p>
+                </div>
+                <form class="mt-8 space-y-6" onsubmit="handleLogin(event)">
+                    <div id="login-error" class="hidden p-3 text-red-700 bg-red-100 rounded-md"></div>
+                    <div>
+                        <label for="login-email" class="sr-only">Email</label>
+                        <input id="login-email" name="email" type="email" required placeholder="Email" autocomplete="email">
+                    </div>
+                    <div>
+                        <label for="login-password" class="sr-only">รหัสผ่าน</label>
+                        <input id="login-password" name="password" type="password" required placeholder="รหัสผ่าน" autocomplete="current-password">
+                    </div>
+                    <div>
+                        <button type="submit" class="btn btn-primary w-full">
+                            เข้าสู่ระบบ
+                        </button>
+                    </div>
+                </form>
+                <p class="mt-4 text-center text-sm text-gray-600">
+                    ยังไม่มีบัญชี?
+                    <button onclick="setModal('register')" class="font-medium text-indigo-600 hover:text-indigo-500">
+                        ลงทะเบียนที่นี่
+                    </button>
+                </p>
+            `;
+        }
+
+        function renderRegisterForm() {
+            return `
+                <div>
+                    <h2 class="text-3xl font-bold text-center text-gray-900">ลงทะเบียน</h2>
+                    <p class="mt-2 text-center text-sm text-gray-600">
+                        เฉพาะผู้ที่ครูอนุญาตไว้เท่านั้น
+                    </p>
+                </div>
+                <form class="mt-8 space-y-4" onsubmit="handleRegister(event)">
+                    <div id="register-error" class="hidden p-3 text-red-700 bg-red-100 rounded-md"></div>
+                    
+                    <div>
+                        <label for="register-student-id" class="block text-sm font-medium text-gray-700">รหัสประจำตัวนักเรียน</label>
+                        <input id="register-student-id" name="studentId" type="text" required placeholder="เช่น 65001">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="register-fname" class="block text-sm font-medium text-gray-700">ชื่อจริง</label>
+                            <input id="register-fname" name="fname" type="text" required placeholder="สมชาย">
+                        </div>
+                        <div>
+                            <label for="register-lname" class="block text-sm font-medium text-gray-700">นามสกุล</label>
+                            <input id="register-lname" name="lname" type="text" required placeholder="ใจดี">
+                        </div>
+                    </div>
+                     <div>
+                        <label for="register-email" class="block text-sm font-medium text-gray-700">Email</label>
+                        <input id="register-email" name="email" type="email" required placeholder="Email" autocomplete="email">
+                    </div>
+                    <div>
+                        <label for="register-password" class="block text-sm font-medium text-gray-700">รหัสผ่าน</label>
+                        <input id="register-password" name="password" type="password" required placeholder="รหัสผ่าน (อย่างน้อย 6 ตัวอักษร)" autocomplete="new-password">
+                    </div>
+                    
+                    <div>
+                        <button type="submit" class="btn btn-primary w-full">
+                            ลงทะเบียน
+                        </button>
+                    </div>
+                </form>
+                <p class="mt-4 text-center text-sm text-gray-600">
+                    มีบัญชีอยู่แล้ว?
+                    <button onclick="setModal('login')" class="font-medium text-indigo-600 hover:text-indigo-500">
+                        เข้าสู่ระบบที่นี่
+                    </button>
+                </p>
+            `;
+        }
+
+        function renderPendingView() {
+            return `
+                <div class="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
+                    <div class="w-full max-w-lg p-8 text-center bg-white rounded-lg shadow-lg">
+                        <i class="fas fa-hourglass-half fa-3x text-indigo-600 mb-4"></i>
+                        <h2 class="text-2xl font-bold text-gray-900 mb-2">สถานะ: รอการอนุมัติ</h2>
+                        <p class="text-gray-600 mb-6">
+                            บัญชีของคุณ (${currentUserAuth ? currentUserAuth.email : ''}) ถูกสร้างเรียบร้อยแล้ว<br/>
+                            กรุณารอให้คุณครูอนุมัติการเข้าใช้งาน
+                        </p>
+                        <button onclick="handleLogout()" class="btn btn-danger">
+                            ออกจากระบบ
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- TEACHER VIEW ---
+
+        function renderTeacherView() {
+            return `
+                <div class="flex h-full">
+                    <!-- Sidebar -->
+                    <nav class="w-64 bg-white shadow-lg flex-shrink-0">
+                        <div class="flex flex-col h-full">
+                            <!-- Header -->
+                            <div class="flex items-center justify-between p-4 border-b">
+                                <span class="text-xl font-bold text-indigo-600"><i class="fas fa-chalkboard-teacher mr-2"></i>โหมดครู</span>
+                            </div>
+                            <!-- Menu -->
+                            <div class="flex-1 overflow-y-auto">
+                                ${renderSidebarItem('manageRoster', 'fas fa-id-card', 'จัดการรายชื่อนักเรียน', currentTeacherView === 'manageRoster')}
+                                ${renderSidebarItem('manageUsers', 'fas fa-users-cog', 'จัดการผู้ใช้งาน', currentTeacherView === 'manageUsers')}
+                                ${renderSidebarItem('manageDocs', 'fas fa-file-upload', 'จัดการเอกสาร', currentTeacherView === 'manageDocs')}
+                                ${renderSidebarItem('manageAssignments', 'fas fa-tasks', 'จัดการงาน', currentTeacherView === 'manageAssignments')}
+                                ${renderSidebarItem('gradebook', 'fas fa-book', 'สรุปคะแนน', currentTeacherView === 'gradebook')}
+                            </div>
+                            <!-- Footer -->
+                            <div class="p-4 border-t">
+                                <div class="mb-2">
+                                    <i class="fas fa-user mr-2 text-gray-500"></i>
+                                    <span class="text-sm font-medium">${currentUserData.fname} ${currentUserData.lname}</span>
+                                </div>
+                                <button onclick="handleLogout()" class="btn btn-danger w-full">
+                                    <i class="fas fa-sign-out-alt mr-2"></i>ออกจากระบบ
+                                </button>
+                            </div>
+                        </div>
+                    </nav>
+                    
+                    <!-- Main Content -->
+                    <main class="flex-1 bg-gray-100 overflow-y-auto p-8">
+                        ${renderTeacherContent()}
+                    </main>
+                </div>
+            `;
+        }
+        
+        function renderSidebarItem(viewName, icon, text, isActive) {
+            return `
+                <div onclick="setTeacherView('${viewName}')" class="sidebar-item flex items-center p-4 text-gray-700 cursor-pointer ${isActive ? 'active' : 'hover:bg-gray-50'}">
+                    <i class="${icon} w-6 text-center ${isActive ? 'text-indigo-600' : 'text-gray-500'}"></i>
+                    <span class="ml-3">${text}</span>
+                </div>
+            `;
+        }
+
+        function renderTeacherContent() {
+            switch (currentTeacherView) {
+                case 'manageRoster':
+                    return renderManageRoster();
+                case 'manageUsers':
+                    return renderManageUsers();
+                case 'manageDocs':
+                    return renderManageDocs();
+                case 'manageAssignments':
+                    return renderManageAssignments();
+                case 'gradebook':
+                    return renderGradebook();
+                default:
+                    return `<h2>ไม่พบหน้า</h2>`;
+            }
+        }
+        
+        // --- Teacher Content: Manage Roster ---
+        function renderManageRoster() {
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">จัดการรายชื่อนักเรียน</h1>
+                <p class="text-gray-600 mb-6">เพิ่มนักเรียนที่ "อนุญาต" ให้ลงทะเบียนได้ นักเรียนจะต้องกรอก รหัสประจำตัว, ชื่อ, และนามสกุล ให้ตรงกับที่คุณกรอกไว้ จึงจะลงทะเบียนได้</p>
+                
+                <!-- Add Student Roster Form -->
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-2xl font-semibold mb-4">เพิ่มนักเรียนในรายชื่อ</h2>
+                    <form onsubmit="handleAddStudentToRoster(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <div class="md:col-span-1">
+                            <label for="roster-id" class="block text-sm font-medium text-gray-700">รหัสประจำตัวนักเรียน</label>
+                            <input id="roster-id" type="text" required placeholder="เช่น 65001">
+                        </div>
+                        <div class="md:col-span-1">
+                            <label for="roster-fname" class="block text-sm font-medium text-gray-700">ชื่อจริง</label>
+                            <input id="roster-fname" type="text" required placeholder="สมชาย">
+                        </div>
+                        <div class="md:col-span-1">
+                            <label for="roster-lname" class="block text-sm font-medium text-gray-700">นามสกุล</label>
+                            <input id="roster-lname" type="text" required placeholder="ใจดี">
+                        </div>
+                        <div class="md:col-span-1">
+                            <button type="submit" class="btn btn-primary w-full">เพิ่ม</button>
+                        </div>
+                    </form>
+                    <div id="roster-error" class="hidden mt-4 p-3 text-red-700 bg-red-100 rounded-md"></div>
+                </div>
+
+                <!-- Roster List -->
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">รหัสประจำตัว</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่อ - นามสกุล</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${studentRoster.sort((a,b) => a.studentId.localeCompare(b.studentId)).map(student => `
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${student.studentId}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${student.fname} ${student.lname}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        ${student.isRegistered ? 
+                                            `<span class="badge badge-registered">ลงทะเบียนแล้ว</span>` : 
+                                            `<span class="badge badge-unregistered">ยังไม่ลงทะเบียน</span>`
+                                        }
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        ${!student.isRegistered ? 
+                                            `<button onclick="handleDeleteRosterStudent('${student.id}')" class="text-red-600 hover:text-red-900">
+                                                <i class="fas fa-trash-alt"></i> ลบ
+                                            </button>` :
+                                            `<span class="text-gray-400 cursor-not-allowed" title="ไม่สามารถลบนักเรียนที่ลงทะเบียนแล้วได้"><i class="fas fa-trash-alt"></i> ลบ</span>`
+                                        }
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+
+        // --- Teacher Content: Manage Users ---
+        function renderManageUsers() {
+            const otherUsers = usersList
+                .filter(u => u.uid !== currentUserAuth.uid) // Filter out self
+                .sort((a,b) => a.fname.localeCompare(b.fname)); // Sort by name
+
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">จัดการผู้ใช้งาน</h1>
+                <p class="text-gray-600 mb-6">อนุมัติสถานะผู้ใช้งานที่ลงทะเบียนเข้ามา หรือเปลี่ยนสิทธิ์ผู้ใช้งาน</p>
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่อ - นามสกุล</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${otherUsers.map(user => `
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${user.fname} ${user.lname}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.email}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        ${renderStatusBadge(user.status)}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                        ${user.status === 'pending' ? `
+                                            <button onclick="updateUserStatus('${user.uid}', 'student')" class="btn btn-success btn-sm text-xs !py-1 !px-2">
+                                                <i class="fas fa-user-check"></i> ตั้งเป็นนักเรียน
+                                            </button>
+                                            <button onclick="updateUserStatus('${user.uid}', 'teacher')" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm text-xs !py-1 !px-2">
+                                                <i class="fas fa-user-shield"></i> ตั้งเป็นครู
+                                            </button>
+                                        ` : ''}
+                                        ${user.status === 'student' ? `
+                                            <button onclick="updateUserStatus('${user.uid}', 'teacher')" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm text-xs !py-1 !px-2">
+                                                <i class="fas fa-user-shield"></i> ตั้งเป็นครู
+                                            </button>
+                                        ` : ''}
+                                        ${user.status === 'teacher' ? `
+                                            <button onclick="updateUserStatus('${user.uid}', 'student')" class="btn btn-success btn-sm text-xs !py-1 !px-2">
+                                                <i class="fas fa-user-check"></i> ตั้งเป็นนักเรียน
+                                            </button>
+                                        ` : ''}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function renderStatusBadge(status) {
+            if (status === 'pending') return `<span class="badge badge-pending">รออนุมัติ</span>`;
+            if (status === 'student') return `<span class="badge badge-student">นักเรียน</span>`;
+            if (status === 'teacher') return `<span class="badge badge-teacher">ครู</span>`;
+            return `<span class="badge badge-unregistered">${status}</span>`;
+        }
+
+        // --- Teacher Content: Manage Documents ---
+        function renderManageDocs() {
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">จัดการเอกสารประกอบการเรียน</h1>
+                
+                <!-- Upload Form -->
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-2xl font-semibold mb-4">อัปโหลดเอกสารใหม่</h2>
+                    <form onsubmit="handleUploadDocument(event)">
+                        <div class="space-y-4">
+                            <div>
+                                <label for="doc-title" class="block text-sm font-medium text-gray-700">ชื่อเอกสาร (เช่น บทที่ 1...)</label>
+                                <input id="doc-title" type="text" required>
+                            </div>
+                            <div>
+                                <label for="doc-file" class="block text-sm font-medium text-gray-700">เลือกไฟล์</label>
+                                <input id="doc-file" type="file" required class="block w-full text-sm text-gray-500
+                                    file:mr-4 file:py-2 file:px-4
+                                    file:rounded-md file:border-0
+                                    file:text-sm file:font-semibold
+                                    file:bg-indigo-50 file:text-indigo-700
+                                    hover:file:bg-indigo-100 cursor-pointer">
+                            </div>
+                            <div class="text-right">
+                                <button type="submit" class="btn btn-primary">อัปโหลด</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Document List -->
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่อเอกสาร</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่อัปโหลด</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${documentsList.sort((a,b) => b.uploadedAt - a.uploadedAt).map(doc => `
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${doc.title}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formatAppTimestamp(doc.uploadedAt)}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                                        <button onclick="showViewDownloads('${doc.id}')" class="text-blue-600 hover:text-blue-900">
+                                            <i class="fas fa-eye"></i> ดูคนโหลด
+                                        </button>
+                                        <a href="${doc.url}" target="_blank" class="text-indigo-600 hover:text-indigo-900">
+                                            <i class="fas fa-download"></i> ดาวน์โหลด
+                                        </a>
+                                        <button onclick="handleDeleteDocument('${doc.id}', '${doc.filePath}')" class="text-red-600 hover:text-red-900">
+                                            <i class="fas fa-trash-alt"></i> ลบ
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        
+        // --- Teacher Content: Manage Assignments ---
+        function renderManageAssignments() {
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">จัดการงานที่มอบหมาย</h1>
+                
+                <!-- Create Assignment Form -->
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-2xl font-semibold mb-4">สร้างงานใหม่</h2>
+                    <form onsubmit="handleCreateAssignment(event)">
+                        <div class="space-y-4">
+                            <div>
+                                <label for="assign-title" class="block text-sm font-medium text-gray-700">ชื่องาน (เช่น การบ้านครั้งที่ 1...)</label>
+                                <input id="assign-title" type="text" required>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="assign-score" class="block text-sm font-medium text-gray-700">คะแนนเต็ม</label>
+                                    <input id="assign-score" type="number" min="0" required placeholder="เช่น 10">
+                                </div>
+                                <div>
+                                    <label for="assign-due-date" class="block text-sm font-medium text-gray-700">กำหนดส่ง</label>
+                                    <input id="assign-due-date" type="date" required>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <button type="submit" class="btn btn-primary">สร้างงาน</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Assignment List -->
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่องาน</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">คะแนนเต็ม</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">กำหนดส่ง</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                             ${assignmentsList.sort((a,b) => b.dueDate - a.dueDate).map(assign => {
+                                 const isExpired = assign.dueDate.toDate() < new Date();
+                                 return `
+                                    <tr class="${isExpired ? 'bg-gray-50' : ''}">
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${isExpired ? 'text-gray-500' : 'text-gray-900'}">${assign.title}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm ${isExpired ? 'text-gray-500' : 'text-gray-900'}">${assign.maxScore}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm ${isExpired ? 'text-red-600' : 'text-gray-500'}">
+                                            ${formatAppTimestamp(assign.dueDate)}
+                                            ${isExpired ? ' (หมดเวลา)' : ''}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                                            <button onclick="showViewSubmissions('${assign.id}')" class="text-blue-600 hover:text-blue-900">
+                                                <i class="fas fa-eye"></i> ดูคนส่ง
+                                            </button>
+                                            <button onclick="handleDeleteAssignment('${assign.id}')" class="text-red-600 hover:text-red-900">
+                                                <i class="fas fa-trash-alt"></i> ลบ
+                                            </button>
+                                        </td>
+                                    </tr>
+                                 `;
+                             }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // --- Teacher Content: Gradebook ---
+        function renderGradebook() {
+            // Get all students
+            const students = usersList.filter(u => u.status === 'student').sort((a,b) => a.fname.localeCompare(b.fname));
+            // Get all assignments, sorted by due date
+            const sortedAssignments = [...assignmentsList].sort((a,b) => a.dueDate.toDate() - b.dueDate.toDate());
+            
+            // Build the grade data
+            const gradeData = students.map(student => {
+                const scores = sortedAssignments.map(assign => {
+                    const submission = submissionsList.find(s => s.studentId === student.uid && s.assignmentId === assign.id);
+                    return submission ? (submission.score !== null ? submission.score : 'ส่งแล้ว') : 'ยังไม่ส่ง';
+                });
+                return {
+                    student,
+                    scores
+                };
+            });
+            
+            return `
+                <div class="flex justify-between items-center mb-6">
+                    <h1 class="text-3xl font-bold text-gray-900">สรุปคะแนน (Gradebook)</h1>
+                    <button onclick="exportGradebookToCSV()" class="btn btn-success">
+                        <i class="fas fa-file-csv mr-2"></i>Export to CSV
+                    </button>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow-md overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-10">ชื่อ - นามสกุล</th>
+                                ${sortedAssignments.map(assign => `
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" style="min-width: 120px;">
+                                        ${assign.title}<br/>
+                                        <span class="font-normal normal-case">(${assign.maxScore} คะแนน)</span>
+                                    </th>
+                                `).join('')}
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${gradeData.map(data => `
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 sticky left-0 bg-white z-10">${data.student.fname} ${data.student.lname}</td>
+                                    ${data.scores.map(score => `
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                            ${(typeof score === 'number') ? score : `<span class="italic text-gray-400">${score}</span>`}
+                                        </td>
+                                    `).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // --- STUDENT VIEW ---
+
+        function renderStudentView() {
+            return `
+                <div class="flex h-full">
+                    <!-- Sidebar -->
+                    <nav class="w-64 bg-white shadow-lg flex-shrink-0">
+                        <div class="flex flex-col h-full">
+                            <!-- Header -->
+                            <div class="flex items-center justify-between p-4 border-b">
+                                <span class="text-xl font-bold text-blue-600"><i class="fas fa-user-graduate mr-2"></i>โหมดนักเรียน</span>
+                            </div>
+                            <!-- Menu -->
+                            <div class="flex-1 overflow-y-auto">
+                                ${renderSidebarItem('downloadDocs', 'fas fa-download', 'ดาวน์โหลดเอกสาร', currentStudentView === 'downloadDocs')}
+                                ${renderSidebarItem('submitWork', 'fas fa-paper-plane', 'ส่งงาน', currentStudentView === 'submitWork')}
+                                ${renderSidebarItem('myHistory', 'fas fa-history', 'ประวัติของฉัน', currentStudentView === 'myHistory')}
+                            </div>
+                            <!-- Footer -->
+                            <div class="p-4 border-t">
+                                <div class="mb-2">
+                                    <i class="fas fa-user mr-2 text-gray-500"></i>
+                                    <span class="text-sm font-medium">${currentUserData.fname} ${currentUserData.lname}</span>
+                                </div>
+                                <button onclick="handleLogout()" class="btn btn-danger w-full">
+                                    <i class="fas fa-sign-out-alt mr-2"></i>ออกจากระบบ
+                                </button>
+                            </div>
+                        </div>
+                    </nav>
+                    
+                    <!-- Main Content -->
+                    <main class="flex-1 bg-gray-100 overflow-y-auto p-8">
+                        ${renderStudentContent()}
+                    </main>
+                </div>
+            `;
+        }
+
+        function renderStudentContent() {
+            switch (currentStudentView) {
+                case 'downloadDocs':
+                    return renderStudentDocs();
+                case 'submitWork':
+                    return renderStudentAssignments();
+                case 'myHistory':
+                    return renderStudentHistory();
+                default:
+                    return `<h2>ไม่พบหน้า</h2>`;
+            }
+        }
+
+        // --- Student Content: Download Docs ---
+        function renderStudentDocs() {
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">ดาวน์โหลดเอกสาร</h1>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    ${documentsList.sort((a,b) => b.uploadedAt - a.uploadedAt).map(doc => `
+                        <div class="bg-white rounded-lg shadow-md p-6 flex flex-col justify-between">
+                            <div>
+                                <h2 class="text-xl font-semibold text-gray-800 mb-2">${doc.title}</h2>
+                                <p class="text-sm text-gray-500 mb-4">อัปโหลดเมื่อ: ${formatAppTimestamp(doc.uploadedAt)}</p>
+                            </div>
+                            <button onclick="showDownloadPrompt('${doc.id}', '${doc.title}', '${doc.url}')" class="btn btn-primary w-full">
+                                <i class="fas fa-download mr-2"></i>ดาวน์โหลด
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // --- Student Content: Submit Work ---
+        function renderStudentAssignments() {
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">ส่งงาน</h1>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    ${assignmentsList.sort((a,b) => b.dueDate - a.dueDate).map(assign => {
+                        const submission = submissionsList.find(s => s.assignmentId === assign.id);
+                        const isExpired = assign.dueDate.toDate() < new Date();
+                        const canSubmit = !submission && !isExpired;
+                        
+                        let statusHtml = '';
+                        if (submission) {
+                            statusHtml = submission.isChecked ?
+                                `<span class="font-semibold text-green-600">ตรวจแล้ว (ได้ ${submission.score} / ${assign.maxScore})</span>` :
+                                `<span class="font-semibold text-blue-600">ส่งแล้ว (รอตรวจ)</span>`;
+                        } else if (isExpired) {
+                            statusHtml = `<span class="font-semibold text-red-600">หมดเวลาส่ง</span>`;
+                        } else {
+                            statusHtml = `<span class="text-gray-500">ยังไม่ส่ง</span>`;
+                        }
+
+                        return `
+                            <div class="bg-white rounded-lg shadow-md p-6 flex flex-col justify-between">
+                                <div>
+                                    <h2 class="text-xl font-semibold text-gray-800 mb-2">${assign.title}</h2>
+                                    <p class="text-sm text-gray-600 mb-1">คะแนนเต็ม: ${assign.maxScore}</p>
+                                    <p class="text-sm text-gray-500 mb-4">
+                                        กำหนดส่ง: <span class="${isExpired && !submission ? 'text-red-600 font-bold' : ''}">${formatAppTimestamp(assign.dueDate)}</span>
+                                    </p>
+                                    <div class="mb-4">สถานะ: ${statusHtml}</div>
+                                </div>
+                                ${canSubmit ? `
+                                    <button onclick="showSubmitPrompt('${assign.id}', '${assign.title}')" class="btn btn-success w-full">
+                                        <i class="fas fa-paper-plane mr-2"></i>ส่งงาน
+                                    </button>
+                                ` : `
+                                    <button class="btn bg-gray-300 text-gray-500 w-full cursor-not-allowed" disabled>
+                                        ${submission ? 'ส่งแล้ว' : 'หมดเวลา'}
+                                    </button>
+                                `}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+        
+        // --- Student Content: My History ---
+        function renderStudentHistory() {
+            // This is a placeholder. You can expand this to show download history, etc.
+            const mySubmissions = submissionsList.map(sub => {
+                const assign = assignmentsList.find(a => a.id === sub.assignmentId);
+                return { ...sub, assignTitle: assign ? assign.title : 'N/A', maxScore: assign ? assign.maxScore : 'N/A' };
+            }).sort((a,b) => b.submittedAt - a.submittedAt);
+            
+            return `
+                <h1 class="text-3xl font-bold text-gray-900 mb-6">ประวัติการส่งงานของฉัน</h1>
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่องาน</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ส่ง</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">คะแนน</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">คอมเมนต์จากครู</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${mySubmissions.map(sub => `
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${sub.assignTitle}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formatAppTimestamp(sub.submittedAt)}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        ${sub.isChecked ? 
+                                            `<span class="badge badge-registered">ตรวจแล้ว</span>` : 
+                                            `<span class="badge badge-student">ส่งแล้ว (รอตรวจ)</span>`
+                                        }
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">
+                                        ${sub.score !== null ? `${sub.score} / ${sub.maxScore}` : '-'}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-normal text-sm text-gray-700 italic">
+                                        ${sub.comment || '-'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+
+        // --- MODALS (Pop-ups) ---
+
+        function renderModals() {
+            const container = document.getElementById('modal-container');
+            if (!container) return;
+            
+            if (!currentModal) {
+                container.innerHTML = '';
+                return;
+            }
+
+            let modalContent = '';
+            
+            // Generic Message Modal
+            if (currentModal === 'showMessage') {
+                // This modal is rendered by showMessage() directly
+            }
+
+            // --- Teacher Modals ---
+            if (currentModal === 'viewDownloads') {
+                modalContent = renderViewDownloadsModal();
+            }
+            if (currentModal === 'viewSubmissions') {
+                modalContent = renderViewSubmissionsModal();
+            }
+            if (currentModal === 'gradeSubmission') {
+                modalContent = renderGradeSubmissionModal();
+            }
+            
+            // --- Student Modals ---
+            if (currentModal === 'downloadPrompt') {
+                modalContent = renderDownloadPromptModal();
+            }
+            if (currentModal === 'submitPrompt') {
+                modalContent = renderSubmitPromptModal();
+            }
+
+            container.innerHTML = `
+                <div class="fixed inset-0 z-40 modal-backdrop"></div>
+                <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div class="bg-white w-full max-w-lg rounded-lg shadow-xl overflow-hidden" role="dialog" aria-modal="true">
+                        ${modalContent}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Specific Modals ---
+
+        function renderViewDownloadsModal() {
+            // This is a placeholder, as we are not fetching download history in this version
+            // to reduce complexity. We will just show who *should* see it.
+            const docId = window.currentModalData.docId;
+            const students = usersList.filter(u => u.status === 'student');
+            
+            return `
+                <div class="p-6">
+                    <h3 class="text-xl font-semibold mb-4">ดูคนดาวน์โหลด (Placeholder)</h3>
+                    <p class="text-gray-600 mb-4">ในระบบจริง ส่วนนี้จะแสดงรายชื่อนักเรียนที่ดาวน์โหลดไฟล์นี้ไปแล้ว</p>
+                    <ul class="max-h-64 overflow-y-auto space-y-2">
+                        ${students.map(s => `
+                            <li class="p-2 bg-gray-50 rounded">${s.fname} ${s.lname} (${s.email})</li>
+                        `).join('') || '<li class="text-gray-500">ยังไม่มีนักเรียนในระบบ</li>'}
+                    </ul>
+                    <div class="text-right mt-6">
+                        <button onclick="setModal(null)" class="btn btn-secondary">ปิด</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderViewSubmissionsModal() {
+            const assignId = window.currentModalData.assignId;
+            const assign = assignmentsList.find(a => a.id === assignId);
+            const subs = submissionsList.filter(s => s.assignmentId === assignId);
+            const students = usersList.filter(u => u.status === 'student');
+            
+            const submissionData = students.map(student => {
+                const submission = subs.find(s => s.studentId === student.uid);
+                return {
+                    student,
+                    submission
+                };
+            }).sort((a,b) => a.student.fname.localeCompare(b.student.fname));
+            
+            return `
+                <div class="p-6">
+                    <h3 class="text-xl font-semibold mb-4">ดูคนส่ง: ${assign.title}</h3>
+                    <div class="max-h-96 overflow-y-auto space-y-3">
+                        ${submissionData.map(data => `
+                            <div class="p-4 rounded-md ${data.submission ? (data.submission.isChecked ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200') : 'bg-gray-50 border border-gray-200'}">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <p class="font-semibold text-gray-900">${data.student.fname} ${data.student.lname}</p>
+                                        ${data.submission ? `
+                                            <p class="text-sm text-gray-600">ส่งเมื่อ: ${formatAppTimestamp(data.submission.submittedAt)}</p>
+                                        ` : `
+                                            <p class="text-sm text-red-600 font-medium">ยังไม่ส่ง</p>
+                                        `}
+                                    </div>
+                                    <div>
+                                        ${data.submission ? `
+                                            <button onclick="showGradeSubmission('${data.submission.id}')" class="btn ${data.submission.isChecked ? 'btn-secondary' : 'btn-success'} btn-sm text-xs !py-1 !px-2">
+                                                <i class="fas fa-edit"></i> ${data.submission.isChecked ? 'แก้ไขคะแนน' : 'ให้คะแนน'}
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                ${data.submission && data.submission.isChecked ? `
+                                    <div class="mt-3 pt-3 border-t border-green-200">
+                                        <p class="text-sm font-semibold">คะแนน: ${data.submission.score} / ${assign.maxScore}</p>
+                                        <p class="text-sm text-gray-700 italic">คอมเมนต์: ${data.submission.comment || '-'}</p>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="text-right mt-6">
+                        <button onclick="setModal(null)" class="btn btn-secondary">ปิด</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderGradeSubmissionModal() {
+            const submissionId = window.currentModalData.submissionId;
+            const submission = submissionsList.find(s => s.id === submissionId);
+            const assign = assignmentsList.find(a => a.id === submission.assignmentId);
+            const student = usersList.find(u => u.uid === submission.studentId);
+            
+            return `
+                <form onsubmit="handleGradeSubmission(event, '${submission.id}')">
+                    <div class="p-6">
+                        <h3 class="text-xl font-semibold mb-2">ตรวจงาน: ${assign.title}</h3>
+                        <p class="text-gray-700 mb-4">นักเรียน: ${student.fname} ${student.lname}</p>
+                        
+                        <div class="mb-4">
+                            <a href="${submission.workUrl}" target="_blank" class="btn btn-primary w-full">
+                                <i class="fas fa-external-link-alt mr-2"></i>เปิดลิงก์งานที่นักเรียนส่ง
+                            </a>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                             <div>
+                                <label for="grade-score" class="block text-sm font-medium text-gray-700">คะแนนที่ได้</label>
+                                <input id="grade-score" type="number" min="0" max="${assign.maxScore}" value="${submission.score || ''}" required placeholder="เช่น 8">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">คะแนนเต็ม</label>
+                                <input type="number" value="${assign.maxScore}" disabled class="bg-gray-100">
+                            </div>
+                        </div>
+                         
+                        <div>
+                            <label for="grade-comment" class="block text-sm font-medium text-gray-700">คอมเมนต์ (ไม่บังคับ)</label>
+                            <input id="grade-comment" type="text" value="${submission.comment || ''}" placeholder="เช่น งานดีมาก">
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 px-6 py-4 flex justify-end space-x-3">
+                        <button type="button" onclick="setModal('viewSubmissions')" class="btn btn-secondary">ยกเลิก</button>
+                        <button type="submit" class="btn btn-success">บันทึกคะแนน</button>
+                    </div>
+                </form>
+            `;
+        }
+        
+        function renderDownloadPromptModal() {
+            const { docId, docTitle, docUrl } = window.currentModalData;
+            return `
+                <div class="p-6">
+                    <h3 class="text-xl font-semibold mb-2">ยืนยันการดาวน์โหลด</h3>
+                    <p class="text-gray-700 mb-6">คุณกำลังจะดาวน์โหลด: <span class="font-semibold">${docTitle}</span>?</p>
+                    <p class="text-xs text-gray-500 mb-4">(การดาวน์โหลดของคุณจะถูกบันทึกไว้ในระบบ)</p>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" onclick="setModal(null)" class="btn btn-secondary">ยกเลิก</button>
+                        <a href="${docUrl}" target="_blank" onclick="handleDownloadDocument('${docId}')" class="btn btn-primary">
+                            ยืนยัน
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderSubmitPromptModal() {
+            const { assignId, assignTitle } = window.currentModalData;
+            return `
+                <form onsubmit="handleSubmitWork(event, '${assignId}')">
+                    <div class="p-6">
+                        <h3 class="text-xl font-semibold mb-2">ส่งงาน: ${assignTitle}</h3>
+                        <p class="text-gray-700 mb-4">กรุณาวางลิงก์ (URL) ของงานคุณ (เช่น Google Docs, Google Drive, Canva)</p>
+                        
+                        <div>
+                            <label for="submit-url" class="block text-sm font-medium text-gray-700">ลิงก์ผลงาน (URL)</label>
+                            <input id="submit-url" type="url" required placeholder="https://docs.google.com/...">
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 px-6 py-4 flex justify-end space-x-3">
+                        <button type="button" onclick="setModal(null)" class="btn btn-secondary">ยกเลิก</button>
+                        <button type="submit" class="btn btn-success">ส่งงาน</button>
+                    </div>
+                </form>
+            `;
+        }
+
+        // --- UTILITY FUNCTIONS ---
+        
+        function formatAppTimestamp(ts) {
+            if (!ts || !ts.toDate) return 'N/A';
+            return ts.toDate().toLocaleString('th-TH', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        
+        function showMessage(title, message, isError = false) {
+            currentModal = 'showMessage';
+            const container = document.getElementById('modal-container');
+            if (!container) return;
+
+            container.innerHTML = `
+                <div class="fixed inset-0 z-40 modal-backdrop"></div>
+                <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div class="bg-white w-full max-w-sm rounded-lg shadow-xl overflow-hidden" role="dialog" aria-modal="true">
+                        <div class="p-6 text-center">
+                            <i class="fas ${isError ? 'fa-times-circle text-red-500' : 'fa-check-circle text-green-500'} fa-3x mb-4"></i>
+                            <h3 class="text-xl font-semibold mb-2">${title}</h3>
+                            <p class="text-gray-700 mb-6">${message}</p>
+                            <button onclick="setModal(null)" class="btn ${isError ? 'btn-danger' : 'btn-primary'} w-full">ตกลง</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function showLoginError(message) {
+            const errorDiv = document.getElementById('login-error');
+            if(errorDiv) {
+                errorDiv.textContent = message;
+                errorDiv.classList.remove('hidden');
+            }
+        }
+        
+        function showRegisterError(message) {
+            const errorDiv = document.getElementById('register-error');
+            if(errorDiv) {
+                errorDiv.textContent = message;
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        // --- WINDOW FUNCTIONS (Event Handlers) ---
+        function attachWindowFunctions() {
+            window.setModal = (modalName) => {
+                currentModal = modalName;
+                if (modalName === 'login' || modalName === 'register') {
+                    renderApp(); // Re-render login/register page
+                } else {
+                    renderModals(); // Just render the modal overlay
+                }
+            };
+            
+            window.setTeacherView = (viewName) => {
+                currentTeacherView = viewName;
+                renderApp();
+            };
+            
+            window.setStudentView = (viewName) => {
+                currentStudentView = viewName;
+                renderApp();
+            };
+
+            window.handleLogin = handleLogin;
+            window.handleRegister = handleRegister;
+            window.handleLogout = handleLogout;
+            window.updateUserStatus = updateUserStatus;
+            
+            // Roster
+            window.handleAddStudentToRoster = handleAddStudentToRoster;
+            window.handleDeleteRosterStudent = handleDeleteRosterStudent;
+            
+            // Teacher
+            window.handleUploadDocument = handleUploadDocument;
+            window.handleDeleteDocument = handleDeleteDocument;
+            window.showViewDownloads = showViewDownloads;
+            window.handleCreateAssignment = handleCreateAssignment;
+            window.handleDeleteAssignment = handleDeleteAssignment;
+            window.showViewSubmissions = showViewSubmissions;
+            window.showGradeSubmission = showGradeSubmission;
+            window.handleGradeSubmission = handleGradeSubmission;
+            window.exportGradebookToCSV = exportGradebookToCSV;
+
+            // Student
+            window.showDownloadPrompt = showDownloadPrompt;
+            window.handleDownloadDocument = handleDownloadDocument;
+            window.showSubmitPrompt = showSubmitPrompt;
+            window.handleSubmitWork = handleSubmitWork;
+        }
+
+        // --- AUTH HANDLERS ---
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            setLoading(true);
+            const email = event.target.email.value;
+            const password = event.target.password.value;
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                // Auth listener will handle the rest
+            } catch (error) {
+                console.error("Login Error:", error.code);
+                showLoginError(getAuthErrorMessage(error.code));
+                setLoading(false);
+            }
+        }
+
+        async function handleRegister(event) {
+            event.preventDefault();
+            setLoading(true);
+
+            const studentId = event.target.studentId.value.trim();
+            const fname = event.target.fname.value.trim();
+            const lname = event.target.lname.value.trim();
+            const email = event.target.email.value;
+            const password = event.target.password.value;
+            
+            try {
+                // 1. Check if student is in the roster and not already registered
+                const q = query(rosterCol(), 
+                    where("studentId", "==", studentId), 
+                    where("fname", "==", fname), 
+                    where("lname", "==", lname)
+                );
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    throw new Error("ข้อมูลไม่ถูกต้อง: ไม่พบรหัสประจำตัว, ชื่อ, หรือนามสกุลนี้ในรายชื่อที่ครูอนุญาต");
+                }
+                
+                const rosterDoc = querySnapshot.docs[0];
+                if (rosterDoc.data().isRegistered) {
+                    throw new Error("รหัสประจำตัวนี้ได้ทำการลงทะเบียนไปแล้ว");
+                }
+
+                // 2. Create Auth user
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // 3. Create user document in Firestore
+                const userDocRef = doc(db, getCollectionPath('users'), user.uid);
+                await setDoc(userDocRef, {
+                    uid: user.uid,
+                    email: user.email,
+                    fname: fname,
+                    lname: lname,
+                    studentId: studentId,
+                    status: 'student' // Auto-approve as student
+                });
+                
+                // 4. Update roster document to mark as registered
+                const rosterDocRef = doc(db, getCollectionPath('roster'), rosterDoc.id);
+                await updateDoc(rosterDocRef, {
+                    isRegistered: true,
+                    registeredUid: user.uid,
+                    registeredEmail: user.email
+                });
+
+                // Success! Auth listener will pick up the new user and log them in.
+                
+            } catch (error) {
+                console.error("Register Error:", error.message);
+                showRegisterError(getAuthErrorMessage(error.message || error.code));
+                setLoading(false);
+            }
+        }
+
+        async function handleLogout() {
+            setLoading(true);
+            await signOut(auth);
+            // Auth listener will handle the rest and show login screen
+            console.log("User logged out.");
+        }
+        
+        async function updateUserStatus(uid, newStatus) {
+            if (!confirm(`คุณแน่ใจหรือไม่ที่จะเปลี่ยนสถานะผู้ใช้นี้เป็น ${newStatus}?`)) return;
+            
+            setLoading(true);
+            try {
+                const userDocRef = doc(db, getCollectionPath('users'), uid);
+                await updateDoc(userDocRef, { status: newStatus });
+                showMessage('สำเร็จ', 'อัปเดตสถานะผู้ใช้เรียบร้อยแล้ว');
+            } catch (error) {
+                console.error("Update Status Error:", error);
+                showMessage('ข้อผิดพลาด', 'ไม่สามารถอัปเดตสถานะได้', true);
+            }
+            setLoading(false);
+        }
+
+        function getAuthErrorMessage(code) {
+            switch (code) {
+                case 'auth/user-not-found':
+                case 'auth/wrong-password':
+                    return 'Email หรือ รหัสผ่านไม่ถูกต้อง';
+                case 'auth/email-already-in-use':
+                    return 'Email นี้ถูกใช้งานแล้ว';
+                case 'auth/weak-password':
+                    return 'รหัสผ่านสั้นเกินไป (อย่างน้อย 6 ตัวอักษร)';
+                case 'auth/invalid-email':
+                    return 'รูปแบบ Email ไม่ถูกต้อง';
+                default:
+                    return code; // Show the raw error message
+            }
+        }
+        
+        // --- ROSTER HANDLERS ---
+        
+        async function handleAddStudentToRoster(event) {
+            event.preventDefault();
+            const studentId = document.getElementById('roster-id').value.trim();
+            const fname = document.getElementById('roster-fname').value.trim();
+            const lname = document.getElementById('roster-lname').value.trim();
+            
+            if (!studentId || !fname || !lname) {
+                document.getElementById('roster-error').textContent = 'กรุณากรอกข้อมูลให้ครบถ้วน';
+                document.getElementById('roster-error').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('roster-error').classList.add('hidden');
+            
+            setLoading(true);
+            try {
+                // Check if student ID already exists
+                const q = query(rosterCol(), where("studentId", "==", studentId));
+                const querySnapshot = await getDocs(q);
+                if (!querySnapshot.empty) {
+                    throw new Error('รหัสประจำตัวนักเรียนนี้มีอยู่ในระบบแล้ว');
+                }
+                
+                await addDoc(rosterCol(), {
+                    studentId,
+                    fname,
+                    lname,
+                    isRegistered: false,
+                    addedBy: currentUserAuth.uid,
+                    addedAt: serverTimestamp()
+                });
+                
+                event.target.reset(); // Clear form
+                
+            } catch (error) {
+                console.error("Add Roster Error:", error);
+                document.getElementById('roster-error').textContent = error.message;
+                document.getElementById('roster-error').classList.remove('hidden');
+            }
+            setLoading(false);
+        }
+        
+        async function handleDeleteRosterStudent(rosterId) {
+             if (!confirm('คุณแน่ใจหรือไม่ที่จะลบนักเรียนนี้ออกจากรายชื่อ?')) return;
+             setLoading(true);
+             try {
+                 await deleteDoc(doc(db, getCollectionPath('roster'), rosterId));
+             } catch (error) {
+                 console.error("Delete Roster Error:", error);
+                 showMessage('ข้อผิดพลาด', 'ไม่สามารถลบรายชื่อได้', true);
+             }
+             setLoading(false);
+        }
+
+
+        // --- TEACHER HANDLERS ---
+
+        async function handleUploadDocument(event) {
+            event.preventDefault();
+            setLoading(true);
+            const title = document.getElementById('doc-title').value;
+            const file = document.getElementById('doc-file').files[0];
+
+            if (!title || !file) {
+                showMessage('ข้อผิดพลาด', 'กรุณากรอกข้อมูลให้ครบถ้วน', true);
+                setLoading(false);
+                return;
+            }
+
+            try {
+                // Create a unique file path
+                const filePath = `documents/${appId}/${Date.now()}-${file.name}`;
+                const fileRef = ref(storage, filePath);
+
+                // Upload file
+                await uploadBytes(fileRef, file);
+
+                // Get download URL
+                const url = await getDownloadURL(fileRef);
+
+                // Add document info to Firestore
+                await addDoc(docsCol(), {
+                    title: title,
+                    url: url,
+                    filePath: filePath, // Store path for deletion
+                    fileName: file.name,
+                    uploadedAt: serverTimestamp(),
+                    uploadedBy: currentUserAuth.uid
+                });
+
+                showMessage('สำเร็จ', 'อัปโหลดเอกสารเรียบร้อยแล้ว');
+                event.target.reset(); // Clear form
+                
+            } catch (error) {
+                console.error("Upload Error:", error);
+                showMessage('ข้อผิดพลาด', `เกิดข้อผิดพลาด: ${error.message}`, true);
+            }
+            setLoading(false);
+        }
+
+        async function handleDeleteDocument(docId, filePath) {
+            if (!confirm('คุณแน่ใจหรือไม่ที่จะลบเอกสารนี้? (นักเรียนจะไม่สามารถดาวน์โหลดได้อีก)')) return;
+
+            setLoading(true);
+            try {
+                // 1. Delete file from Storage
+                const fileRef = ref(storage, filePath);
+                await deleteObject(fileRef);
+
+                // 2. Delete document from Firestore
+                await deleteDoc(doc(db, getCollectionPath('documents'), docId));
+
+                showMessage('สำเร็จ', 'ลบเอกสารเรียบร้อยแล้ว');
+            } catch (error) {
+                console.error("Delete Doc Error:", error);
+                showMessage('ข้อผิดพลาด', `เกิดข้อผิดพลาด: ${error.message}`, true);
+            }
+            setLoading(false);
+        }
+
+        function showViewDownloads(docId) {
+            window.currentModalData = { docId };
+            setModal('viewDownloads');
+        }
+
+        async function handleCreateAssignment(event) {
+            event.preventDefault();
+            setLoading(true);
+            
+            const title = document.getElementById('assign-title').value;
+            const maxScore = parseInt(document.getElementById('assign-score').value, 10);
+            const dueDateStr = document.getElementById('assign-due-date').value;
+            
+            if (!title || isNaN(maxScore) || !dueDateStr) {
+                showMessage('ข้อผิดพลาด', 'กรุณากรอกข้อมูลให้ครบถ้วน', true);
+                setLoading(false);
+                return;
+            }
+            
+            // Convert local date input to a Firestore Timestamp
+            // Input value is YYYY-MM-DD. We parse it as local time (end of day).
+            const localDate = new Date(dueDateStr);
+            const endOfDay = new Date(localDate.getFullYear(), localDate.getMonth(), localDate.getDate(), 23, 59, 59);
+            const dueDateTimestamp = Timestamp.fromDate(endOfDay);
+
+            try {
+                await addDoc(assignmentsCol(), {
+                    title: title,
+                    maxScore: maxScore,
+                    dueDate: dueDateTimestamp,
+                    createdAt: serverTimestamp(),
+                    createdBy: currentUserAuth.uid
+                });
+                
+                showMessage('สำเร็จ', 'สร้างงานเรียบร้อยแล้ว');
+                event.target.reset();
+
+            } catch (error) {
+                console.error("Create Assignment Error:", error);
+                showMessage('ข้อผิดพลาด', `เกิดข้อผิดพลาด: ${error.message}`, true);
+            }
+            setLoading(false);
+        }
+        
+        async function handleDeleteAssignment(assignId) {
+            if (!confirm('คุณแน่ใจหรือไม่ที่จะลบงานนี้? (การส่งงานของนักเรียนที่เกี่ยวข้องจะถูกลบไปด้วย!)')) return;
+            
+            setLoading(true);
+            try {
+                const batch = writeBatch(db);
+                
+                // 1. Delete the assignment
+                const assignRef = doc(db, getCollectionPath('assignments'), assignId);
+                batch.delete(assignRef);
+                
+                // 2. Find and delete all related submissions
+                const q = query(submissionsCol(), where("assignmentId", "==", assignId));
+                const querySnapshot = await getDocs(q);
+                querySnapshot.forEach((doc) => {
+                    batch.delete(doc.ref);
+                });
+                
+                await batch.commit();
+                showMessage('สำเร็จ', 'ลบงานและการส่งงานทั้งหมดเรียบร้อยแล้ว');
+                
+            } catch (error) {
+                console.error("Delete Assignment Error:", error);
+                showMessage('ข้อผิดพลาด', `เกิดข้อผิดพลาด: ${error.message}`, true);
+            }
+            setLoading(false);
+        }
+        
+        function showViewSubmissions(assignId) {
+            window.currentModalData = { assignId };
+            setModal('viewSubmissions');
+        }
+
+        function showGradeSubmission(submissionId) {
+            window.currentModalData = { ...window.currentModalData, submissionId };
+            setModal('gradeSubmission');
+        }
+        
+        async function handleGradeSubmission(event, submissionId) {
+            event.preventDefault();
+            setLoading(true);
+            
+            const score = parseInt(document.getElementById('grade-score').value, 10);
+            const comment = document.getElementById('grade-comment').value;
+            
+            try {
+                const subRef = doc(db, getCollectionPath('submissions'), submissionId);
+                await updateDoc(subRef, {
+                    score: score,
+                    comment: comment,
+                    isChecked: true,
+                    checkedAt: serverTimestamp()
+                });
+                
+                setModal('viewSubmissions'); // Go back to submission list
+                
+            } catch (error) {
+                console.error("Grade Submission Error:", error);
+                showMessage('ข้อผิดพลาด', 'ไม่สามารถบันทึกคะแนนได้', true);
+            }
+            setLoading(false);
+        }
+        
+        function exportGradebookToCSV() {
+            // Re-build data similarly to renderGradebook
+            const students = usersList.filter(u => u.status === 'student').sort((a,b) => a.fname.localeCompare(b.fname));
+            const sortedAssignments = [...assignmentsList].sort((a,b) => a.dueDate.toDate() - b.dueDate.toDate());
+
+            let csvContent = "data:text/csv;charset=utf-8,";
+            
+            // Header Row
+            const headerTitles = sortedAssignments.map(a => `"${a.title} (${a.maxScore} คะแนน)"`);
+            csvContent += `"รหัสประจำตัว","ชื่อ","นามสกุล",${headerTitles.join(',')}\r\n`;
+
+            // Data Rows
+            students.forEach(student => {
+                let row = `"${student.studentId}","${student.fname}","${student.lname}"`;
+                sortedAssignments.forEach(assign => {
+                    const submission = submissionsList.find(s => s.studentId === student.uid && s.assignmentId === assign.id);
+                    const score = submission ? (submission.score !== null ? submission.score : 'ส่งแล้ว') : 'ยังไม่ส่ง';
+                    row += `,"${score}"`;
+                });
+                csvContent += row + "\r\n";
+            });
+
+            // Create and download link
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "gradebook_export.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+
+        // --- STUDENT HANDLERS ---
+        
+        function showDownloadPrompt(docId, docTitle, docUrl) {
+            window.currentModalData = { docId, docTitle, docUrl };
+            setModal('downloadPrompt');
+        }
+
+        async function handleDownloadDocument(docId) {
+            // This function is called when the student *confirms* the download.
+            // We just log the download, the 'href' handles the actual download.
+            try {
+                await addDoc(downloadsCol(), {
+                    docId: docId,
+                    studentId: currentUserAuth.uid,
+                    studentName: `${currentUserData.fname} ${currentUserData.lname}`,
+                    downloadedAt: serverTimestamp()
+                });
+                console.log("Download logged for doc:", docId);
+            } catch (error) {
+                console.error("Log Download Error:", error);
+            }
+            setModal(null); // Close modal
+        }
+        
+        function showSubmitPrompt(assignId, assignTitle) {
+            window.currentModalData = { assignId, assignTitle };
+            setModal('submitPrompt');
+        }
+
+        async function handleSubmitWork(event, assignId) {
+            event.preventDefault();
+            setLoading(true);
+
+            const workUrl = document.getElementById('submit-url').value;
+            
+            try {
+                await addDoc(submissionsCol(), {
+                    assignmentId: assignId,
+                    studentId: currentUserAuth.uid,
+                    studentName: `${currentUserData.fname} ${currentUserData.lname}`,
+                    workUrl: workUrl,
+                    submittedAt: serverTimestamp(),
+                    isChecked: false,
+                    score: null,
+                    comment: null
+                });
+                
+                showMessage('สำเร็จ', 'ส่งงานเรียบร้อยแล้ว');
+                setModal(null); // Close modal
+
+            } catch (error) {
+                console.error("Submit Work Error:", error);
+                showMessage('ข้อผิดพลาด', 'ไม่สามารถส่งงานได้', true);
+            }
+            setLoading(false);
+        }
+        
+    </script>
+</body>
+</html>
+
