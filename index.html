@@ -115,6 +115,10 @@
         let currentModal = null; 
         let modalData = {}; 
         
+        // --- START: เพิ่ม State สำหรับตัวกรอง Gradebook ---
+        let currentGradebookFilter = 'all'; // 'all' หรือ classroomId
+        // --- END: เพิ่ม State สำหรับตัวกรอง Gradebook ---
+        
         let listeners = [];
         
         // --- COLLECTIONS PATHS ---
@@ -1124,6 +1128,15 @@
                 e.preventDefault(); handleAddClassroom();
             }
         });
+
+        // --- START: เพิ่ม Event Listener สำหรับ Gradebook Filter ---
+        document.addEventListener('change', (e) => {
+            if (e.target.id === 'gradebook-classroom-filter') {
+                currentGradebookFilter = e.target.value;
+                render(); // Re-render gradebook content
+            }
+        });
+        // --- END: เพิ่ม Event Listener ---
         
         function attachModalEventHandlers() {
             const downloadForm = document.getElementById('download-log-form');
@@ -1687,8 +1700,15 @@
             }
         }
         
+        // --- START: แก้ไข Gradebook ให้มีตัวกรอง ---
         function renderGradebook() {
-            const students = allUsers.filter(u => u.status === 'student');
+            // กรองนักเรียนตามห้องที่เลือก
+            const filteredStudents = allUsers.filter(u => {
+                if (u.status !== 'student') return false;
+                if (currentGradebookFilter === 'all') return true;
+                return u.classroomId === currentGradebookFilter;
+            });
+            
             const sortedAssignments = [...assignments].sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
 
             const getScore = (studentId, assignmentId) => {
@@ -1716,11 +1736,17 @@
 
             return `
                 <div class="bg-white p-6 rounded-lg shadow-lg">
-                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b pb-2 gap-4">
                         <h2 class="text-2xl font-semibold">สรุปคะแนน (Gradebook)</h2>
-                        <button onclick="window.exportGradebookToCSV()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">
-                            Export to CSV
-                        </button>
+                        <div class="flex gap-2 w-full sm:w-auto">
+                            <select id="gradebook-classroom-filter" class="w-full sm:w-auto p-2 border rounded-md">
+                                <option value="all">แสดงทุกห้อง</option>
+                                ${classrooms.map(c => `<option value="${c.id}" ${currentGradebookFilter === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                            </select>
+                            <button onclick="window.exportGradebookToCSV()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm flex-shrink-0">
+                                Export to CSV
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="overflow-x-auto">
@@ -1741,9 +1767,9 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                ${students.length === 0 
-                                    ? `<tr><td colspan="${sortedAssignments.length + 2}" class="p-4 text-center text-gray-500">ยังไม่มีนักเรียน</td></tr>`
-                                    : students.map(student => {
+                                ${filteredStudents.length === 0 
+                                    ? `<tr><td colspan="${sortedAssignments.length + 2}" class="p-4 text-center text-gray-500">ไม่พบนักเรียนในห้องที่เลือก</td></tr>`
+                                    : filteredStudents.map(student => {
                                         const classroom = classrooms.find(c => c.id === student.classroomId);
                                         return `
                                     <tr class="hover:bg-gray-50">
@@ -1769,7 +1795,12 @@
         }
         
         window.exportGradebookToCSV = () => {
-            const students = allUsers.filter(u => u.status === 'student');
+            // กรองนักเรียนตามห้องที่เลือก (เหมือนใน renderGradebook)
+            const filteredStudents = allUsers.filter(u => {
+                if (u.status !== 'student') return false;
+                if (currentGradebookFilter === 'all') return true;
+                return u.classroomId === currentGradebookFilter;
+            });
             const sortedAssignments = [...assignments].sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
 
             const getScore = (studentId, assignmentId) => {
@@ -1804,7 +1835,8 @@
             header.push(`"Total (Max: ${getMaxTotal()})"`);
             csvContent += header.join(",") + "\r\n";
 
-            students.forEach(student => {
+            // ใช้ filteredStudents แทน
+            filteredStudents.forEach(student => {
                 const classroom = classrooms.find(c => c.id === student.classroomId);
                 let row = [
                     `"${student.studentId || 'N/A'}"`,
@@ -1821,12 +1853,13 @@
 
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `gradebook_${new Date().toISOString().split('T')[0]}.csv`);
+            const filterName = currentGradebookFilter === 'all' ? 'all_classrooms' : classrooms.find(c => c.id === currentGradebookFilter)?.name || 'filtered';
+            link.setAttribute("download", `gradebook_${filterName}_${new Date().toISOString().split('T')[0]}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
         }
+        // --- END: แก้ไข Gradebook ---
 
         async function handleExtendDeadline(e) {
             e.preventDefault();
