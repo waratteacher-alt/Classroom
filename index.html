@@ -336,7 +336,7 @@
                 <div class="flex items-center justify-center" style="height: 60vh;">
                     <div class="w-full max-w-md p-8 text-center bg-white rounded-lg shadow-lg">
                         <h2 class="text-2xl font-bold text-yellow-600 mb-4">รอการอนุมัติ</h2>
-                        <p class="text-gray-700">บัญชีของคุณ (${currentUser?.email}) กำลังรอการอนุมัติจากคุณครู</p>
+                        <p class="text-gray-700">บัญชีของคุณ (${currentUserAuth?.email}) กำลังรอการอนุมัติจากคุณครู</p>
                         <p class="text-gray-700 mt-2">กรุณาติดต่อคุณครูเพื่อเปิดใช้งานบัญชี</p>
                     </div>
                 </div>
@@ -1081,7 +1081,7 @@
                     title, // [FIX 2] แก้ไข Field
                     fileUrl, // [FIX 2] แก้ไข Field
                     createdAt: Timestamp.now(),
-                    createdBy: currentUser.email
+                    createdBy: currentUserAuth.email
                 });
                 window.showMessage('เพิ่มเอกสารเรียบร้อยแล้ว', 'success');
                 // Reset form
@@ -1110,7 +1110,7 @@
                     deadline,
                     maxScore: parseInt(maxScore, 10), // [FIX 3] เพิ่มการบันทึก
                     createdAt: Timestamp.now(),
-                    createdBy: currentUser.email // เพิ่ม: บันทึกว่าใครสร้าง
+                    createdBy: currentUserAuth.email // เพิ่ม: บันทึกว่าใครสร้าง
                 });
                 window.showMessage('สร้างงานเรียบร้อยแล้ว', 'success');
                 document.getElementById('create-assignment-form').reset();
@@ -1216,6 +1216,26 @@
 
         // --- START: ฟังก์ชันใหม่/แก้ไข ---
         
+        // (ครู) เปิด Modal ขยายเวลา
+        window.showExtendDeadline = (assignmentId) => {
+            const assignment = assignments.find(a => a.id === assignmentId);
+            if (!assignment) {
+                window.showMessage('ไม่พบงานที่ต้องการ', 'error');
+                return;
+            }
+            
+            // Format the current deadline for the datetime-local input
+            // It needs to be in 'YYYY-MM-DDThh:mm' format
+            const currentDeadline = assignment.deadline ? 
+                new Date(assignment.deadline.toMillis() - (new Date().getTimezoneOffset() * 60000))
+                .toISOString().slice(0, 16) 
+                : '';
+
+            currentModal = 'extendDeadline';
+            modalData = { assignmentId, currentDeadline };
+            render();
+        }
+
         // (ครู) เปิด Modal สำหรับให้คะแนน
         window.showGradeModal = (submissionId) => {
             const submission = allSubmissions.find(s => s.id === submissionId);
@@ -1587,7 +1607,6 @@
         }
         
         // --- Attach Functions to Window ---
-        // window.toggleRole = toggleRole; // <--- ลบบรรทัดนี้ (เกิด Error เพราะฟังก์ชันนี้ไม่มีแล้ว)
         window.showViewDownloaders = showViewDownloaders;
         window.handleDelete = handleDelete;
         window.showViewSubmissions = showViewSubmissions;
@@ -1611,8 +1630,4 @@
     </script>
 </body>
 </html>
-
-
-
-
 
